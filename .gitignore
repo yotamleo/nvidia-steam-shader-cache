@@ -1,0 +1,3 @@
+# single-writer marker — allows on-main edits in this repo (himmel guardrail opt-out)
+.single-writer
+__pycache__/

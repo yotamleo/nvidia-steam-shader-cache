@@ -1,0 +1,11 @@
+[Unit]
+Description=Copy Steam's Overwatch shader pre-cache into the private NVIDIA cache after each replay
+
+[Service]
+ExecStart=%h/.local/bin/ow-shader-sync --watch
+Restart=on-failure
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Overwatch: when Steam's fossilize replay ends, reflink-copy the NVIDIA shader
+# cache it just built into the private cache the game reads (launch options point
+# __GL_SHADER_DISK_CACHE_PATH at ~/.cache/nvidia-overwatch, because Steam's
+# shadercachemanager mangles its own merged copy: "Mismatching key!").
+# Steam merges the fragments seconds after the replay process exits and BEFORE it
+# logs "fossilize_replay completed", then deletes them, so this triggers on
+# process exit, not the log.
+# Usage: ow-shader-sync             -> copy now
+#        ow-shader-sync --watch     -> copy each time a replay process exits
+#        ow-shader-sync --print-ro  -> print the READ_ONLY_APP_NAME launch-option value
+set -euo pipefail
+
+APP=2357570
+SRC_ROOT="$HOME/.local/share/Steam/steamapps/shadercache/$APP/nvidiav1/GLCache"
+DST_ROOT="$HOME/.cache/nvidia-overwatch/GLCache"
+
+sync_now() {
+  local src rel dst f n
+  for src in "$SRC_ROOT"/*/*/; do
+    [ -d "$src" ] || continue
+    rel="${src#"$SRC_ROOT"/}"
+    dst="$DST_ROOT/$rel"
+    mkdir -p "$dst"
+    n=0
+    for f in "$src"steamapp_*shader_cache*.bin "$src"steamapp_*shader_cache*.toc; do
+      [ -f "$f" ] || continue
+      # fragment names restart at 0 every replay: never let a small run clobber a full one
+      if [ -f "$dst/${f##*/}" ] && [ "$(stat -c %s "$dst/${f##*/}")" -gt "$(stat -c %s "$f")" ]; then
+        continue
+      fi
+      cp --reflink=auto -f "$f" "$dst"
+      n=$((n + 1))
+    done
+    echo "$(date '+%F %T') synced $n files -> $dst"
+  done
+}
+
+print_ro() {
+  # the driver takes ';'-separated exact names; a ',' list or a bare prefix is silently ignored
+  local names
+  names=$(find "$DST_ROOT" -name 'steamapp_*shader_cache*.bin' -printf '%f\n' |
+    sed 's/\.bin$//' | sort -u -V | paste -sd ';')
+  echo "__GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME=\"$names\""
+}
+
+replaying() {
+  # comm is truncated to 15 chars; matching comm (not -f) avoids self-matching this script
+  pgrep -x fossilize_repla >/dev/null
+}
+
+case "${1:-}" in
+  --watch)
+    was=0
+    while :; do
+      if replaying; then
+        was=1
+      elif [ "$was" = 1 ]; then
+        was=0
+        sync_now
+      fi
+      sleep 0.5
+    done
+    ;;
+  --print-ro) print_ro ;;
+  *) sync_now ;;
+esac
