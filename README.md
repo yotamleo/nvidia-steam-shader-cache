@@ -105,8 +105,13 @@ prunes precompiled shaders by size), [#9803](https://github.com/ValveSoftware/st
 [Proton#9548](https://github.com/ValveSoftware/Proton/issues/9548) (Overwatch
 recompile every relaunch on NVIDIA, closed unresolved),
 [NVIDIA forum thread](https://forums.developer.nvidia.com/t/pre-compiled-shader-cache-cleaned-by-nvidia-driver-causing-stutter-when-launching-vulkan-apps/336196).
-The `;` separator is not documented anywhere found. Draft report:
-`upstream/steam-for-linux-issue-draft.md` — **not filed; operator-gated.**
+The `;` separator is not documented anywhere found.
+
+Filed 2026-09-16: **[steam-for-linux#13622](https://github.com/ValveSoftware/steam-for-linux/issues/13622)**
+(body in `upstream/steam-for-linux-13622.md`; framed as the root cause of the
+shrink in #11392). NVIDIA separator doc gap: forum draft in
+`upstream/nvidia-forum-read-only-app-name-draft.md`, **not posted** (needs a
+browser login). Responses on upstream threads are operator-owned.
 
 ## Layout
 
@@ -114,6 +119,6 @@ The `;` separator is not documented anywhere found. Draft report:
 bin/ow-shader-sync            copy / --watch / --print-ro
 systemd/ow-shader-sync.service
 tools/probe-read-only.py      which READ_ONLY values the driver honours (inotify, headless)
-upstream/                     draft issue for ValveSoftware/steam-for-linux
+upstream/                     filed steam-for-linux issue body, NVIDIA forum draft
 install.sh
 ```
