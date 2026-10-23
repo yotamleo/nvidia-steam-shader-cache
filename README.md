@@ -5,13 +5,13 @@ game update or new Shader Swarm bucket, Steam shows **"Processing Vulkan
 shaders"**, and the game still stutters with DXVK compiling for minutes after
 launch. **Local repo, private.** himmel Jira **HIMMEL-3054**.
 
-Current target: **OVERLORD8** (CachyOS, RTX 4090, nvidia-open 615.71.09),
+Current target: **OVERLORD8** (CachyOS, RTX 4090, nvidia-open 615.78.08),
 **Overwatch 2** (Steam appid 2357570, proton-cachyos-slr).
 
 ## Symptoms → use this
 
 - "Processing Vulkan shaders" after every Overwatch update, then cold-cache
-  stutter anyway (60 fps, GPU idle, `dxvk-sh*` threads pegged in `top -H`).
+  stutter anyway (FPS drop, `dxvk-sh*` threads pegged in `top -H`).
 - `~/.local/share/Steam/logs/shader_log.txt` shows thousands of
   `Mismatching key! Entry N/M.` and/or `FOZ underflow, file truncated?`.
 - The merged cache
@@ -20,35 +20,47 @@ Current target: **OVERLORD8** (CachyOS, RTX 4090, nvidia-open 615.71.09),
 
 ## Root cause
 
-1. Steam's fossilize replay compiles Valve's pipeline set through the NVIDIA
-   driver into 31 fragments, `steamapp_shader_cache0..30.{bin,toc}` (one per
-   replay thread).
-2. **Seconds after `fossilize_replay` exits** — before Steam logs
-   `fossilize_replay completed` — shadercachemanager merges the fragments into
-   `steamapp_merged_shader_cache.bin` and **deletes them**.
-3. That merge (and the one at game exit, which folds in the game's own
-   fragment) logs "Mismatching key!" and loses entries: 2026-09-13 exit merge =
-   40,558 mismatches, merged .bin 6.94 GB → 4.80 GB; next launch cold again.
-   Reproduced on drivers 610.57 and 615.71.09.
+Two separate problems, both measured on 2026-10-23:
 
-So pointing the game at Steam's cache dir can never stay warm on this driver.
+1. **4 GiB offset wraparound in Steam's merge.** A `.toc` entry is a 16-byte key,
+   a u32 offset and a u32 size, so a merged `.bin` past 2^32 bytes gets wrapped
+   offsets. Steam can't find those entries ("Mismatching key!"), drops them at
+   the next merge, the file shrinks, the next session regrows it, and the cycle
+   repeats. Stock setup, exit merge: 5,370,772,223 B, 50,673 of 262,547 entries
+   (19 %) found only at stored offset + 2^32. Check: `tools/tocwrap.py`.
+2. **Steam's precompiled entries partly don't match what the game needs.** With
+   all entries recovered into valid parts (`tools/ow-split.py`) and read-only
+   for the game, it still recompiled 50,164 keys from the first part. Same
+   16-byte key, but different record header bytes 20..28, size and payload. The
+   TOC key isn't the full identity of a shader. Unverified guess:
+   `fossilize_replay` doesn't get the `Overwatch.exe` driver application profile.
 
-## The fix
+Steam merges the replay fragments seconds after `fossilize_replay` exits and
+deletes them, so pointing the game at Steam's cache dir can never stay warm.
 
-Three parts:
+## The fix: an isolated driver cache
 
-1. **Private driver cache** in the launch options, so Steam's merger never
-   touches what the game writes:
-   `__GL_SHADER_DISK_CACHE_PATH=/home/overlord/.cache/nvidia-overwatch __GL_SHADER_DISK_CACHE_APP_NAME=overwatch __GL_SHADER_DISK_CACHE_SIZE=17179869184 __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1`
-   (size + skip-cleanup also stop the driver's own 1 GB pruning, steam-for-linux#11392).
-2. **`bin/ow-shader-sync --watch`** (systemd user unit) reflink-copies Steam's
-   fragments + merged file into the private cache dir the moment the replay
-   process exits — before Steam merges and deletes them. A size guard keeps a
-   later small replay from overwriting a full run's same-named fragment.
-3. **Read-only list** in the launch options, so the game reads Steam's set
-   without writing to it:
-   `__GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME="steamapp_merged_shader_cache;steamapp_shader_cache0;…;steamapp_shader_cache30"`.
-   Generate the exact value with `ow-shader-sync --print-ro`.
+Point the driver at a private dir in the launch options. Steam's merger never
+touches it, and the driver rolls its own files (`overwatch1.bin`, …), so the
+4 GiB problem doesn't arise:
+
+```
+PROTON_ENABLE_WAYLAND=1 PROTON_ENABLE_HDR=1 PROTON_CPU_TOPOLOGY=16:0,1,2,3,4,5,6,7,16,17,18,19,20,21,22,23 MANGOHUD=1 __GL_SHADER_DISK_CACHE_PATH=/home/overlord/.cache/nvidia-overwatch __GL_SHADER_DISK_CACHE_APP_NAME=overwatch __GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME="owsplit0;owsplit1;owsplit2" __GL_SHADER_DISK_CACHE_SIZE=17179869184 __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1 taskset -c 0-7,16-23 %command%
+```
+
+Size + skip-cleanup stop the driver's own 1 GB pruning (steam-for-linux#11392).
+The `owsplit*` read-only list is an optional seed recovered from Steam's merged
+file with `tools/ow-split.py`. It's partly useful at best (see root cause 2), so
+it can be dropped.
+
+Measured: first launch wrote 2.46 GB in about 8.5 min; the relaunch wrote
+**0 bytes in its first 3 min** and 65 MB over a whole match. A ~4 min burst of
+`dxvk-shader` threads at ~950 % CPU remains at launch even when warm, probably
+DXVK-side work the NVIDIA cache can't skip. `dxvk.conf` with
+`dxvk.numCompilerThreads = 6` softens it.
+
+Same approach as a public tool: [Xerrion/steam-shader-guard](https://github.com/Xerrion/steam-shader-guard)
+(isolated cache, recover/split, skips Steam's NVIDIA replay).
 
 ### Gotcha: the separator is `;`, names must be exact (undocumented)
 
@@ -64,61 +76,61 @@ Verified with `tools/probe-read-only.py` on 615.71.09:
 
 The `;` must be inside quotes in Steam launch options (Steam runs them through a shell).
 
-## Full launch options (Overwatch, OVERLORD8)
+## Previous approach: `ow-shader-sync`
 
-```
-PROTON_ENABLE_WAYLAND=1 PROTON_ENABLE_HDR=1 PROTON_CPU_TOPOLOGY=16:0,1,2,3,4,5,6,7,16,17,18,19,20,21,22,23 MANGOHUD=1 __GL_SHADER_DISK_CACHE_PATH=/home/overlord/.cache/nvidia-overwatch __GL_SHADER_DISK_CACHE_APP_NAME=overwatch __GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME="steamapp_merged_shader_cache;steamapp_shader_cache0;steamapp_shader_cache1;steamapp_shader_cache2;steamapp_shader_cache3;steamapp_shader_cache4;steamapp_shader_cache5;steamapp_shader_cache6;steamapp_shader_cache7;steamapp_shader_cache8;steamapp_shader_cache9;steamapp_shader_cache10;steamapp_shader_cache11;steamapp_shader_cache12;steamapp_shader_cache13;steamapp_shader_cache14;steamapp_shader_cache15;steamapp_shader_cache16;steamapp_shader_cache17;steamapp_shader_cache18;steamapp_shader_cache19;steamapp_shader_cache20;steamapp_shader_cache21;steamapp_shader_cache22;steamapp_shader_cache23;steamapp_shader_cache24;steamapp_shader_cache25;steamapp_shader_cache26;steamapp_shader_cache27;steamapp_shader_cache28;steamapp_shader_cache29;steamapp_shader_cache30" __GL_SHADER_DISK_CACHE_SIZE=17179869184 __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1 taskset -c 0-7,16-23 %command%
-```
-
-The fragment count (31) follows Steam's `fossilize_replay --num-threads`. If a
-future replay writes a different count, re-run `--print-ro` and update the list.
-
-## Install
-
-```bash
-./install.sh   # symlinks bin + unit, enables ow-shader-sync.service
-```
-
-After that: let "Processing Vulkan shaders" finish, then play. Nothing else.
+`bin/ow-shader-sync --watch` (systemd user unit, `./install.sh`) copied Steam's
+replay fragments + merged file into the private dir before Steam merged and
+deleted them, and the game read them via a 32-name read-only list
+(`ow-shader-sync --print-ro`). It's disabled now: the merged copy carries the
+wrapped offsets, and the replay entries hit root cause 2. The one-shot
+`ow-shader-sync` (no `--watch`) is still the way to capture a replay's fragments
+for analysis.
 
 ## Verify
 
-- Copy happened: `journalctl --user -u ow-shader-sync` shows `synced N files`.
-- Game reads it: `ls -l /proc/$(pgrep -x Overwatch.exe)/fd | grep -c 'nvidia-overwatch.*steamapp'`
-  → 64 (32 × bin+toc). 0 means the READ_ONLY value is wrong (see gotcha).
-- Warm: `overwatch1.bin` in the private dir does not grow during the first minutes.
+- Game reads the private dir: `ls -l /proc/$(pgrep -f 'Overwatch.exe' | head -1)/fd | grep -c nvidia-overwatch`.
+- Warm: `tools/ow-warmcheck.sh` before launching; it samples game-own cache
+  growth and `dxvk-shader` CPU at +1/3/5/10 min. Warm = cache bytes flat.
+- Live load: `tools/ow-load.sh` (busy threads, per-core load), `tools/ow-compile.sh`.
 - Without restarting the game: `tools/probe-read-only.py '<value>'`.
 
 ## Resets
 
-- **Driver update** → new `GLCache/<driver-hash>/` dir; everything cold once.
-  The watcher copies into whatever hash dir Steam's replay used.
-- **Game / Proton update** → partial invalidation; Steam's replay covers it.
+- **Driver update** → new `GLCache/<driver-hash>/` dir; private cache cold once
+  (one long compile burst). The old dir stays: prune it by hand.
+- **Game / Proton update** → partial recompile once; the cache grows (16 GiB cap).
 
-## Upstream status (checked 2026-09-16)
+## Upstream status
 
-No existing report of the merge corruption on steam-for-linux, Proton, DXVK,
-NVIDIA's tracker or forum, or CachyOS. Adjacent: steam-for-linux
-[#11392](https://github.com/ValveSoftware/steam-for-linux/issues/11392) (driver
-prunes precompiled shaders by size), [#9803](https://github.com/ValveSoftware/steam-for-linux/issues/9803)
-(precompiling into dirs the driver never reads),
-[Proton#9548](https://github.com/ValveSoftware/Proton/issues/9548) (Overwatch
-recompile every relaunch on NVIDIA, closed unresolved),
-[NVIDIA forum thread](https://forums.developer.nvidia.com/t/pre-compiled-shader-cache-cleaned-by-nvidia-driver-causing-stutter-when-launching-vulkan-apps/336196).
-The `;` separator is not documented anywhere found.
-
-Filed 2026-09-16: **[steam-for-linux#13622](https://github.com/ValveSoftware/steam-for-linux/issues/13622)**
-(body in `upstream/steam-for-linux-13622.md`; framed as the root cause of the
-shrink in #11392). NVIDIA separator doc gap: forum draft in
-`upstream/nvidia-forum-read-only-app-name-draft.md`, **not posted** (needs a
-browser login). Responses on upstream threads are operator-owned.
+- [steam-for-linux#13622](https://github.com/ValveSoftware/steam-for-linux/issues/13622),
+  filed 2026-09-16 (body `upstream/steam-for-linux-13622.md`). Still open, no
+  Valve reply as of 2026-10-23. `edmundselliot` found the 4 GiB wrap first (CS2).
+  Ours: stock confirmation (`upstream/13622-comment.md`) and the isolated-cache /
+  same-key-different-record follow-up (`upstream/13622-followup.md`).
+- [steam-shader-guard#7](https://github.com/Xerrion/steam-shader-guard/issues/7):
+  field report (`upstream/ssg-issue.md`).
+- Adjacent: steam-for-linux [#11392](https://github.com/ValveSoftware/steam-for-linux/issues/11392)
+  (driver prunes precompiled shaders by size), [#9803](https://github.com/ValveSoftware/steam-for-linux/issues/9803)
+  (precompiling into dirs the driver never reads),
+  [Proton#9548](https://github.com/ValveSoftware/Proton/issues/9548) (Overwatch
+  recompile every relaunch on NVIDIA, closed unresolved),
+  [NVIDIA forum thread](https://forums.developer.nvidia.com/t/pre-compiled-shader-cache-cleaned-by-nvidia-driver-causing-stutter-when-launching-vulkan-apps/336196).
+- NVIDIA `;` separator doc gap: draft `upstream/nvidia-forum-read-only-app-name-draft.md`,
+  **not posted** (needs a browser login). Responses on upstream threads are operator-owned.
 
 ## Layout
 
 ```
-bin/ow-shader-sync            copy / --watch / --print-ro
-systemd/ow-shader-sync.service
+tools/tocwrap.py              count wrapped TOC offsets in a merged .toc/.bin
+tools/ow-split.py             split a merged file into verified <2 GiB parts, prints the RO list
+tools/keyoverlap.py           how many keys of a new .toc already exist in others
+tools/reccmp.py               same key in two files: compare record headers/payloads
+tools/dupkeys.py              entries vs unique keys per .toc
+tools/ow-warmcheck.sh         sample the next Overwatch launch (warm or cold)
+tools/ow-load.sh, ow-compile.sh   live load snapshots
 tools/probe-read-only.py      which READ_ONLY values the driver honours (inotify, headless)
-upstream/                     filed steam-for-linux issue body, NVIDIA forum draft
+bin/ow-shader-sync            previous approach: copy / --watch / --print-ro
+systemd/ow-shader-sync.service
+upstream/                     posted issue/comment texts, NVIDIA forum draft
 install.sh
 ```
