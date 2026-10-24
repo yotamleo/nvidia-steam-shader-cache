@@ -1,5 +1,5 @@
 Thread: https://forums.developer.nvidia.com/t/pre-compiled-shader-cache-cleaned-by-nvidia-driver-causing-stutter-when-launching-vulkan-apps/336196
-Status: draft, not posted (reply in the thread).
+Status: posted 2026-10-24: https://forums.developer.nvidia.com/t/pre-compiled-shader-cache-cleaned-by-nvidia-driver-causing-stutter-when-launching-vulkan-apps/336196/5
 
 Body:
 

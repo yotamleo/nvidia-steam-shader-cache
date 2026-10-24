@@ -1,6 +1,6 @@
 Where: Steam Community, Steam Client Beta group, "Bug Reports" discussions
 https://steamcommunity.com/groups/SteamClientBeta/discussions/0/
-Status: draft, not posted.
+Status: posted 2026-10-24: https://steamcommunity.com/groups/SteamClientBeta/discussions/0/569301136947844269/
 
 Title: [Linux][NVIDIA] Shader pre-cache merge corrupts steamapp_merged_shader_cache past 4 GiB (games recompile shaders after every exit)
 

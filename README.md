@@ -132,6 +132,9 @@ is still a way to capture a replay's fragments for analysis.
   isolated-cache follow-up). Texts in `upstream/`.
 - [steam-shader-guard#7](https://github.com/Xerrion/steam-shader-guard/issues/7):
   field report from this setup.
+- [Steam Client Beta bug report](https://steamcommunity.com/groups/SteamClientBeta/discussions/0/569301136947844269/)
+  and a [reply on the NVIDIA forum](https://forums.developer.nvidia.com/t/pre-compiled-shader-cache-cleaned-by-nvidia-driver-causing-stutter-when-launching-vulkan-apps/336196/5)
+  asking whether the u32 offset is a hard 4 GiB per-file limit.
 - Adjacent: steam-for-linux [#11392](https://github.com/ValveSoftware/steam-for-linux/issues/11392)
   (driver prunes precompiled shaders by size), [#9803](https://github.com/ValveSoftware/steam-for-linux/issues/9803)
   (precompiling into dirs the driver never reads),
