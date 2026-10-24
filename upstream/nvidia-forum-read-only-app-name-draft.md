@@ -1,5 +1,5 @@
 Forum: https://forums.developer.nvidia.com/c/gpu-graphics/linux/148  (Linux category; no public tracker for the userspace driver)
-Status: DRAFT, not posted (needs a browser login — operator posts)
+Status: draft, not posted.
 
 Title: __GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME: list separator is ';' (undocumented); ',' and prefixes are silently ignored
 

@@ -1,4 +1,10 @@
+#!/usr/bin/env python3
+"""Count .toc entries whose u32 .bin offset wrapped past 4 GiB (key found only at offset + 2^32).
+Usage: tocwrap.py <merged.toc> <merged.bin>"""
 import mmap, struct, sys
+
+if len(sys.argv) < 3:
+    sys.exit(__doc__)
 
 toc_path, bin_path = sys.argv[1], sys.argv[2]
 toc = open(toc_path, "rb").read()

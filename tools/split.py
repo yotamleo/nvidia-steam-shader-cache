@@ -7,7 +7,7 @@ Record layout (32-byte header + payload): magic 9da14698, key[16] at +4,
 payload size u32 at +28. TOC: the same 32-byte file header, then 24-byte
 entries: key[16], offset u32, size u32.
 
-Usage: ow-split.py <merged.toc> <out-dir> [part-prefix]
+Usage: split.py <merged.toc> <out-dir> [part-prefix]
 Prints the ';'-joined part names for __GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME.
 """
 import os, struct, sys
@@ -61,8 +61,10 @@ def resolve(toc_path):
 
 
 def main():
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
     toc_path, out_dir = sys.argv[1], sys.argv[2]
-    prefix = sys.argv[3] if len(sys.argv) > 3 else "owsplit"
+    prefix = sys.argv[3] if len(sys.argv) > 3 else "split"
     bin_path = toc_path[:-4] + ".bin"
     before = (stamp(toc_path), stamp(bin_path))
     header, rows, length, wrapped = resolve(toc_path)

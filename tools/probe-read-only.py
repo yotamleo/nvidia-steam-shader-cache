@@ -6,10 +6,11 @@ inotify through ctypes, so no strace/inotifywait is needed. Safe while a game
 runs. Leaves a 32-byte probe0.bin/.toc pair in the dir; delete it afterwards.
 
 Usage: probe-read-only.py 'name_a;name_b' 'name_a,name_b' ...
+Env: CACHE_DIR = the private cache dir (default ~/.cache/nvidia-overwatch).
 """
 import ctypes, glob, os, select, struct, subprocess, sys, time
 
-CACHE_PATH = os.path.expanduser("~/.cache/nvidia-overwatch")
+CACHE_PATH = os.path.expanduser(os.environ.get("CACHE_DIR", "~/.cache/nvidia-overwatch"))
 IN_OPEN = 0x20
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 
